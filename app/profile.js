@@ -1,771 +1,730 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
+  TextInput,
   TouchableOpacity,
-  Image,
+  StyleSheet,
   ScrollView,
-  SafeAreaView,
-  Platform,
+  Image,
   Alert,
+  Modal,
   ActivityIndicator,
-  Dimensions
+  Platform,
+  KeyboardAvoidingView,
+  StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MaterialIcons, FontAwesome5, Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { MaterialIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 export default function Profile() {
-  const [user, setUser] = useState({
-    name: '',
-    email: '',
-    joinDate: '',
-    reportsCount: 0,
-    resolvedCount: 0,
-    points: 0,
-    level: 'Citizen'
-  });
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    resolved: 0,
-    urgent: 0
-  });
-  const [profileImage, setProfileImage] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingImage, setLoadingImage] = useState(false);
   const router = useRouter();
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
+
+  const [userData, setUserData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    profileImage: null,
+    bio: '',
+    location: '',
+    // stats placeholders (mund t’i lidhësh me API më vonë)
+    listings: 0,
+    followers: 0,
+    rating: 0,
+  });
+
+  // vetëm ndryshimet gjatë edit
+  const [editedData, setEditedData] = useState({});
+
   useEffect(() => {
-    loadUserData();
+    (async () => {
+      await requestPermissions();
+      await loadUserData();
+    })();
   }, []);
+
+  const requestPermissions = async () => {
+    try {
+      if (Platform.OS !== 'web') {
+        const lib = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (lib.status !== 'granted') {
+          Alert.alert('Leje e nevojshme', 'Na duhen lejet për të hyrë në galeri.');
+        }
+      }
+    } catch (e) {
+      // s’e bllokojmë app-in për permissions
+    }
+  };
 
   const loadUserData = async () => {
     try {
-      const userName = await AsyncStorage.getItem('userName') || 'Urban Guardian';
-      const userEmail = await AsyncStorage.getItem('userEmail') || 'user@example.com';
-      const joinDate = await AsyncStorage.getItem('joinDate') || new Date().toISOString();
-      const savedImage = await AsyncStorage.getItem('profileImage');
-      
-      // Load reports to calculate stats
-      const { getReports } = require('../utils/storage');
-      const reports = await getReports();
-      
-      const userReports = reports; // In real app, filter by user
-      const resolved = userReports.filter(r => r.status === 'resolved').length;
-      const pending = userReports.filter(r => r.status === 'pending').length;
-      const urgent = userReports.filter(r => r.priority === 'urgent').length;
-      
-      // Calculate points and level
-      const points = (resolved * 10) + (userReports.length * 5);
-      const level = calculateLevel(points);
+      setLoading(true);
 
-      setUser({
-        name: userName,
-        email: userEmail,
-        joinDate: new Date(joinDate).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        }),
-        reportsCount: userReports.length,
-        resolvedCount: resolved,
-        points,
-        level
-      });
+      const stored = await AsyncStorage.getItem('userProfileData');
+      const name = (await AsyncStorage.getItem('userName')) || '';
+      const email = (await AsyncStorage.getItem('userEmail')) || '';
 
-      setStats({
-        total: userReports.length,
-        pending,
-        resolved,
-        urgent
-      });
-
-      if (savedImage) {
-        setProfileImage(savedImage);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setUserData(prev => ({
+          ...prev,
+          ...parsed,
+          name: parsed?.name || name || 'Dhurim Citaku',
+          email: parsed?.email || email || 'dhurim@example.com',
+        }));
+      } else {
+        setUserData(prev => ({
+          ...prev,
+          name: name || 'Dhurim Citaku',
+          email: email || 'dhurim@example.com',
+          listings: 12,
+          followers: 248,
+          rating: 4.8,
+        }));
       }
     } catch (error) {
       console.error('Error loading user data:', error);
+      Alert.alert('Gabim', 'Nuk u arrit të ngarkohen të dhënat e profilit.');
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateLevel = (points) => {
-    if (points >= 500) return 'Urban Hero';
-    if (points >= 250) return 'City Champion';
-    if (points >= 100) return 'Active Citizen';
-    return 'Citizen';
+  const handleInputChange = (field, value) => {
+    setEditedData(prev => ({ ...prev, [field]: value }));
   };
 
-  const getLevelColor = (level) => {
-    switch(level) {
-      case 'Urban Hero': return '#8B5CF6';
-      case 'City Champion': return '#3B82F6';
-      case 'Active Citizen': return '#10B981';
-      default: return '#6B7280';
-    }
-  };
+  const mergedData = useMemo(() => ({ ...userData, ...editedData }), [userData, editedData]);
 
-  const getLevelIcon = (level) => {
-    switch(level) {
-      case 'Urban Hero': return 'trophy';
-      case 'City Champion': return 'award';
-      case 'Active Citizen': return 'star';
-      default: return 'user';
-    }
-  };
+  const initials = useMemo(() => {
+    const n = (mergedData.name || '').trim();
+    if (!n) return 'U';
+    const parts = n.split(' ').filter(Boolean);
+    const first = parts[0]?.[0] || 'U';
+    const second = parts.length > 1 ? parts[1]?.[0] : '';
+    return (first + second).toUpperCase();
+  }, [mergedData.name]);
 
-  const pickProfileImage = async () => {
-    Alert.alert(
-      'Change Profile Picture',
-      'Choose how you want to update your profile picture',
-      [
-        { text: 'Take Photo', onPress: takeProfilePhoto },
-        { text: 'Choose from Gallery', onPress: pickProfileFromGallery },
-        { text: 'Remove Photo', onPress: removeProfilePhoto, style: 'destructive' },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
-  };
-
-  const takeProfilePhoto = async () => {
-    setLoadingImage(true);
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera permission is required to take photos.');
-      setLoadingImage(false);
+  const toggleEdit = () => {
+    if (saving || uploading) return;
+    if (isEditing) {
+      // nëse është editing, mos e fik pa e ruajt ose cancel (për të mos humb data)
       return;
     }
+    setEditedData({});
+    setIsEditing(true);
+  };
 
-    let result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+  const cancelEdit = () => {
+    if (saving || uploading) return;
+    setEditedData({});
+    setIsEditing(false);
+  };
 
-    setLoadingImage(false);
-    if (!result.canceled && result.assets[0]) {
-      setProfileImage(result.assets[0].uri);
-      await AsyncStorage.setItem('profileImage', result.assets[0].uri);
+  const saveProfile = async () => {
+    try {
+      setSaving(true);
+
+      const updated = { ...userData, ...editedData };
+
+      // validime minimale
+      if (!updated.name || updated.name.trim().length < 2) {
+        Alert.alert('Gabim', 'Emri duhet të ketë të paktën 2 karaktere.');
+        return;
+      }
+      if (!updated.email || !updated.email.includes('@')) {
+        Alert.alert('Gabim', 'Email nuk është valid.');
+        return;
+      }
+
+      await AsyncStorage.setItem('userProfileData', JSON.stringify(updated));
+      if (updated.name) await AsyncStorage.setItem('userName', updated.name);
+      if (updated.email) await AsyncStorage.setItem('userEmail', updated.email);
+
+      setUserData(updated);
+      setEditedData({});
+      setIsEditing(false);
+
+      Alert.alert('Sukses', 'Profili u ruajt me sukses!');
+    } catch (error) {
+      console.error('Error saving user data:', error);
+      Alert.alert('Gabim', 'Ndodhi një gabim gjatë ruajtjes së profilit.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const pickProfileFromGallery = async () => {
-    setLoadingImage(true);
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Gallery permission is required to select photos.');
-      setLoadingImage(false);
-      return;
-    }
+  const pickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
 
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+      if (!result.canceled) {
+        setUploading(true);
+        const uri = result.assets[0].uri;
 
-    setLoadingImage(false);
-    if (!result.canceled && result.assets[0]) {
-      setProfileImage(result.assets[0].uri);
-      await AsyncStorage.setItem('profileImage', result.assets[0].uri);
+        // simulim upload (zëvendësoje me API kur ta kesh)
+        await new Promise(r => setTimeout(r, 700));
+
+        setEditedData(prev => ({ ...prev, profileImage: uri }));
+        setImageModalVisible(false);
+        if (!isEditing) setIsEditing(true);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Gabim', 'Ndodhi një gabim gjatë zgjedhjes së fotos.');
+    } finally {
+      setUploading(false);
     }
   };
 
-  const removeProfilePhoto = async () => {
-    setProfileImage(null);
-    await AsyncStorage.removeItem('profileImage');
+  const takePhoto = async () => {
+    try {
+      const cam = await ImagePicker.requestCameraPermissionsAsync();
+      if (cam.status !== 'granted') {
+        Alert.alert('Leje e nevojshme', 'Na duhen lejet për kamerën.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (!result.canceled) {
+        setUploading(true);
+        const uri = result.assets[0].uri;
+
+        await new Promise(r => setTimeout(r, 700));
+
+        setEditedData(prev => ({ ...prev, profileImage: uri }));
+        setImageModalVisible(false);
+        if (!isEditing) setIsEditing(true);
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Gabim', 'Ndodhi një gabim gjatë bërjes së fotos.');
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            await AsyncStorage.removeItem('userToken');
-            await AsyncStorage.removeItem('userName');
-            router.replace('/login');
-          }
-        }
-      ]
-    );
-  };
+  const renderImagePickerModal = () => (
+    <Modal
+      animationType="slide"
+      transparent
+      visible={imageModalVisible}
+      onRequestClose={() => setImageModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Ndrysho foton</Text>
+            <TouchableOpacity onPress={() => setImageModalVisible(false)}>
+              <MaterialIcons name="close" size={24} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
 
-  const handleEditProfile = () => {
-    router.push('/edit-profile');
-  };
+          <View style={styles.modalOptions}>
+            <TouchableOpacity style={styles.modalOption} onPress={takePhoto} disabled={uploading}>
+              <View style={[styles.modalIcon, { backgroundColor: '#2563EB' }]}>
+                <MaterialIcons name="camera-alt" size={26} color="#fff" />
+              </View>
+              <Text style={styles.modalOptionText}>Kamerë</Text>
+            </TouchableOpacity>
 
-  const getBadges = () => {
-    const badges = [];
-    
-    if (stats.resolved >= 10) {
-      badges.push({ name: 'Problem Solver', icon: 'check-circle', color: '#10B981' });
-    }
-    if (stats.total >= 20) {
-      badges.push({ name: 'Active Reporter', icon: 'flag', color: '#3B82F6' });
-    }
-    if (stats.urgent >= 5) {
-      badges.push({ name: 'Emergency Hero', icon: 'alert-circle', color: '#EF4444' });
-    }
-    if (user.level === 'Urban Hero') {
-      badges.push({ name: 'Top Contributor', icon: 'trophy', color: '#F59E0B' });
-    }
-    
-    return badges;
-  };
+            <TouchableOpacity style={styles.modalOption} onPress={pickImage} disabled={uploading}>
+              <View style={[styles.modalIcon, { backgroundColor: '#10B981' }]}>
+                <MaterialIcons name="photo-library" size={26} color="#fff" />
+              </View>
+              <Text style={styles.modalOptionText}>Galeria</Text>
+            </TouchableOpacity>
+          </View>
+
+          {uploading && (
+            <View style={styles.uploadingContainer}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.uploadingText}>Duke përditësuar...</Text>
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setImageModalVisible(false)}>
+            <Text style={styles.cancelButtonText}>Mbyll</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2563EB" />
+          <Text style={styles.loadingText}>Duke ngarkuar profilin...</Text>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header with Back Button */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <MaterialIcons name="arrow-back" size={24} color="#1F2937" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Profile</Text>
-          <TouchableOpacity 
-            style={styles.editButton}
-            onPress={handleEditProfile}
-          >
-            <Feather name="edit-2" size={20} color="#3B82F6" />
-          </TouchableOpacity>
-        </View>
+      <StatusBar barStyle="dark-content" />
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.back()}>
+              <MaterialIcons name="arrow-back" size={22} color="#111827" />
+            </TouchableOpacity>
 
-        {/* Profile Header Section */}
-        <View style={styles.profileHeader}>
-          <TouchableOpacity 
-            style={styles.profileImageContainer}
-            onPress={pickProfileImage}
-            disabled={loadingImage}
-          >
-            {loadingImage ? (
-              <View style={styles.imageLoading}>
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              </View>
-            ) : profileImage ? (
-              <Image source={{ uri: profileImage }} style={styles.profileImage} />
+            <Text style={styles.headerTitle}>Profili</Text>
+
+            {!isEditing ? (
+              <TouchableOpacity style={styles.headerActionBtn} onPress={toggleEdit}>
+                <Text style={styles.headerActionText}>Edit</Text>
+              </TouchableOpacity>
             ) : (
-              <View style={styles.profileImagePlaceholder}>
-                <MaterialIcons name="person" size={64} color="#FFFFFF" />
-              </View>
+              <View style={{ width: 56 }} />
             )}
-            <View style={styles.cameraBadge}>
-              <MaterialIcons name="camera-alt" size={16} color="#FFFFFF" />
-            </View>
-          </TouchableOpacity>
-
-          <View style={styles.profileInfo}>
-            <Text style={styles.userName}>{user.name}</Text>
-            <View style={styles.levelBadge}>
-              <FontAwesome5 
-                name={getLevelIcon(user.level)} 
-                size={14} 
-                color={getLevelColor(user.level)} 
-              />
-              <Text style={[styles.levelText, { color: getLevelColor(user.level) }]}>
-                {user.level}
-              </Text>
-            </View>
-            <Text style={styles.userEmail}>{user.email}</Text>
-            <Text style={styles.joinDate}>Member since {user.joinDate}</Text>
           </View>
-        </View>
 
-        {/* Points Card */}
-        <View style={styles.pointsCard}>
-          <View style={styles.pointsLeft}>
-            <MaterialIcons name="workspace-premium" size={24} color="#F59E0B" />
-            <View style={styles.pointsInfo}>
-              <Text style={styles.pointsLabel}>Community Points</Text>
-              <Text style={styles.pointsValue}>{user.points} pts</Text>
-            </View>
-          </View>
-          <View style={styles.pointsRight}>
-            <Text style={styles.nextLevelText}>
-              {user.level === 'Urban Hero' 
-                ? 'Max Level Achieved!' 
-                : `${500 - user.points} pts to next level`}
-            </Text>
-          </View>
-        </View>
+          {/* Hero / Profile Card */}
+          <View style={styles.hero}>
+            <View style={styles.profileCard}>
+              <View style={styles.avatarRow}>
+                <View style={styles.avatarWrap}>
+                  {mergedData.profileImage ? (
+                    <Image source={{ uri: mergedData.profileImage }} style={styles.avatar} />
+                  ) : (
+                    <View style={styles.avatarPlaceholder}>
+                      <Text style={styles.initials}>{initials}</Text>
+                    </View>
+                  )}
 
-        {/* Quick Stats */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Reporting Impact</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: '#DBEAFE' }]}>
-                <MaterialIcons name="description" size={24} color="#3B82F6" />
-              </View>
-              <Text style={styles.statNumber}>{stats.total}</Text>
-              <Text style={styles.statLabel}>Total Reports</Text>
-            </View>
-            
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: '#D1FAE5' }]}>
-                <MaterialIcons name="check-circle" size={24} color="#10B981" />
-              </View>
-              <Text style={styles.statNumber}>{stats.resolved}</Text>
-              <Text style={styles.statLabel}>Resolved</Text>
-            </View>
-            
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
-                <MaterialIcons name="pending" size={24} color="#F59E0B" />
-              </View>
-              <Text style={styles.statNumber}>{stats.pending}</Text>
-              <Text style={styles.statLabel}>Pending</Text>
-            </View>
-            
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: '#FEE2E2' }]}>
-                <MaterialIcons name="warning" size={24} color="#EF4444" />
-              </View>
-              <Text style={styles.statNumber}>{stats.urgent}</Text>
-              <Text style={styles.statLabel}>Urgent</Text>
-            </View>
-          </View>
-        </View>
+                  <TouchableOpacity
+                    style={styles.avatarEditBtn}
+                    onPress={() => setImageModalVisible(true)}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons name="camera" size={18} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                </View>
 
-        {/* Badges Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Achievements & Badges</Text>
-          <View style={styles.badgesContainer}>
-            {getBadges().length > 0 ? (
-              getBadges().map((badge, index) => (
-                <View key={index} style={styles.badgeItem}>
-                  <View style={[styles.badgeIcon, { backgroundColor: `${badge.color}20` }]}>
-                    <Feather name={badge.icon} size={24} color={badge.color} />
+                <View style={styles.nameBlock}>
+                  {!isEditing ? (
+                    <>
+                      <Text style={styles.nameText}>{mergedData.name}</Text>
+                      <Text style={styles.emailText}>{mergedData.email}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.inputLabel}>Emri</Text>
+                      <TextInput
+                        style={styles.inlineInput}
+                        value={mergedData.name}
+                        onChangeText={t => handleInputChange('name', t)}
+                        placeholder="Emri dhe mbiemri"
+                      />
+                      <Text style={[styles.inputLabel, { marginTop: 12 }]}>Email</Text>
+                      <TextInput
+                        style={styles.inlineInput}
+                        value={mergedData.email}
+                        onChangeText={t => handleInputChange('email', t)}
+                        placeholder="email@example.com"
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                      />
+                    </>
+                  )}
+                </View>
+              </View>
+
+              {/* Stats */}
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{mergedData.listings ?? 0}</Text>
+                  <Text style={styles.statLabel}>Listings</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{mergedData.followers ?? 0}</Text>
+                  <Text style={styles.statLabel}>Followers</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{mergedData.rating ?? 0}</Text>
+                  <Text style={styles.statLabel}>Rating</Text>
+                </View>
+              </View>
+
+              {/* Bio */}
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Bio</Text>
+                  <FontAwesome5 name="user-edit" size={14} color="#6B7280" />
+                </View>
+
+                {!isEditing ? (
+                  <Text style={styles.sectionText}>
+                    {mergedData.bio?.trim()
+                      ? mergedData.bio
+                      : 'Shto një bio të shkurtër që njerëzit të të njohin më mirë.'}
+                  </Text>
+                ) : (
+                  <TextInput
+                    style={[styles.textArea, { marginTop: 10 }]}
+                    value={mergedData.bio}
+                    onChangeText={t => handleInputChange('bio', t)}
+                    placeholder="Përshkrim i shkurtër..."
+                    multiline
+                    numberOfLines={4}
+                    textAlignVertical="top"
+                  />
+                )}
+              </View>
+
+              {/* Contact */}
+              <View style={styles.sectionBlock}>
+                <Text style={styles.sectionTitle}>Kontakt</Text>
+
+                <View style={styles.infoRow}>
+                  <View style={styles.infoLeft}>
+                    <MaterialIcons name="phone" size={18} color="#6B7280" />
+                    <Text style={styles.infoLabel}>Telefon</Text>
                   </View>
-                  <Text style={styles.badgeName}>{badge.name}</Text>
+
+                  {!isEditing ? (
+                    <Text style={styles.infoValue}>{mergedData.phone?.trim() ? mergedData.phone : '—'}</Text>
+                  ) : (
+                    <TextInput
+                      style={styles.infoInput}
+                      value={mergedData.phone}
+                      onChangeText={t => handleInputChange('phone', t)}
+                      placeholder="+383 XX XXX XXX"
+                      keyboardType="phone-pad"
+                    />
+                  )}
                 </View>
-              ))
-            ) : (
-              <View style={styles.noBadges}>
-                <MaterialIcons name="emoji-events" size={48} color="#E5E7EB" />
-                <Text style={styles.noBadgesText}>No badges yet</Text>
-                <Text style={styles.noBadgesHint}>Keep reporting to earn badges!</Text>
-              </View>
-            )}
-          </View>
-        </View>
 
-        {/* Menu Options */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account Settings</Text>
-          <View style={styles.menuContainer}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/my-reports')}>
-              <View style={styles.menuItemLeft}>
-                <MaterialIcons name="list-alt" size={22} color="#3B82F6" />
-                <Text style={styles.menuItemText}>My Reports</Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={22} color="#9CA3AF" />
-            </TouchableOpacity>
+                <View style={styles.infoRow}>
+                  <View style={styles.infoLeft}>
+                    <MaterialIcons name="location-on" size={18} color="#6B7280" />
+                    <Text style={styles.infoLabel}>Lokacioni</Text>
+                  </View>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/notifications')}>
-              <View style={styles.menuItemLeft}>
-                <MaterialIcons name="notifications" size={22} color="#F59E0B" />
-                <Text style={styles.menuItemText}>Notifications</Text>
-              </View>
-              <View style={styles.menuItemRight}>
-                <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>3</Text>
+                  {!isEditing ? (
+                    <Text style={styles.infoValue}>
+                      {mergedData.location?.trim() ? mergedData.location : '—'}
+                    </Text>
+                  ) : (
+                    <TextInput
+                      style={styles.infoInput}
+                      value={mergedData.location}
+                      onChangeText={t => handleInputChange('location', t)}
+                      placeholder="p.sh. Mitrovicë"
+                    />
+                  )}
                 </View>
-                <MaterialIcons name="chevron-right" size={22} color="#9CA3AF" />
               </View>
-            </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy')}>
-              <View style={styles.menuItemLeft}>
-                <MaterialIcons name="security" size={22} color="#10B981" />
-                <Text style={styles.menuItemText}>Privacy & Security</Text>
+              {/* Actions (vetëm në edit mode) */}
+              {isEditing && (
+                <View style={styles.editActions}>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={cancelEdit} disabled={saving || uploading}>
+                    <Text style={styles.cancelBtnText}>Anulo</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} disabled={saving || uploading}>
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.saveBtnText}>Ruaj</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Quick Links (jo settings brenda – vetëm navigim) */}
+          <View style={styles.quickLinks}>
+            <Text style={styles.quickTitle}>Më shumë</Text>
+
+            <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/settings')}>
+              <View style={styles.linkLeft}>
+                <MaterialIcons name="settings" size={20} color="#4B5563" />
+                <Text style={styles.linkText}>Settings</Text>
               </View>
               <MaterialIcons name="chevron-right" size={22} color="#9CA3AF" />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/help')}>
-              <View style={styles.menuItemLeft}>
-                <MaterialIcons name="help-center" size={22} color="#8B5CF6" />
-                <Text style={styles.menuItemText}>Help & Support</Text>
+            <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/my_listings')}>
+              <View style={styles.linkLeft}>
+                <MaterialIcons name="inventory" size={20} color="#4B5563" />
+                <Text style={styles.linkText}>My Listings</Text>
               </View>
               <MaterialIcons name="chevron-right" size={22} color="#9CA3AF" />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/about')}>
-              <View style={styles.menuItemLeft}>
-                <MaterialIcons name="info" size={22} color="#6B7280" />
-                <Text style={styles.menuItemText}>About UrbanIssue Reporter</Text>
+            <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/messages')}>
+              <View style={styles.linkLeft}>
+                <MaterialIcons name="chat" size={20} color="#4B5563" />
+                <Text style={styles.linkText}>Messages</Text>
               </View>
               <MaterialIcons name="chevron-right" size={22} color="#9CA3AF" />
             </TouchableOpacity>
           </View>
-        </View>
 
-        {/* Logout Button */}
-        <TouchableOpacity 
-          style={styles.logoutButton}
-          onPress={handleLogout}
-        >
-          <MaterialIcons name="logout" size={22} color="#EF4444" />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+          <View style={{ height: 28 }} />
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-        {/* Footer Version */}
-        <View style={styles.footer}>
-          <Text style={styles.versionText}>UrbanIssue Reporter v1.0.0</Text>
-        </View>
-      </ScrollView>
+      {renderImagePickerModal()}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  container: {
-    flex: 1,
-  },
+  safeArea: { flex: 1, backgroundColor: '#F9FAFB' },
+  container: { flex: 1 },
+
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 15, color: '#6B7280' },
+
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'ios' ? 10 : 30,
-    paddingBottom: 20,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F3F4F6',
-    justifyContent: 'center',
+    borderBottomColor: '#EEF2F7',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1F2937',
+  headerIconBtn: { padding: 8, borderRadius: 12 },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  headerActionBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
   },
-  editButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EFF6FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileHeader: {
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 32,
+  headerActionText: { fontSize: 14, fontWeight: '700', color: '#2563EB' },
+
+  hero: { paddingHorizontal: 16, paddingTop: 16 },
+  profileCard: {
     backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 2,
   },
-  profileImageContainer: {
-    position: 'relative',
-    marginBottom: 20,
-  },
-  profileImagePlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#3B82F6',
+
+  avatarRow: { flexDirection: 'row', gap: 14, alignItems: 'flex-start' },
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 88, height: 88, borderRadius: 44, borderWidth: 3, borderColor: '#E5E7EB' },
+  avatarPlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#2563EB',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#E5E7EB',
   },
-  profileImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-  },
-  cameraBadge: {
+  initials: { fontSize: 26, fontWeight: '800', color: '#FFFFFF' },
+  avatarEditBtn: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#3B82F6',
+    bottom: -6,
+    right: -6,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#111827',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 3,
     borderColor: '#FFFFFF',
   },
-  imageLoading: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#3B82F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profileInfo: {
-    alignItems: 'center',
-  },
-  userName: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#1F2937',
-    marginBottom: 8,
-  },
-  levelBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginBottom: 12,
-    gap: 6,
-  },
-  levelText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  userEmail: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  joinDate: {
-    fontSize: 14,
-    color: '#9CA3AF',
-  },
-  pointsCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 24,
-    marginTop: -20,
-    padding: 20,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
-  },
-  pointsLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  pointsInfo: {
-    gap: 4,
-  },
-  pointsLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  pointsValue: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#1F2937',
-  },
-  pointsRight: {
-    alignItems: 'flex-end',
-  },
-  nextLevelText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'right',
-  },
-  section: {
-    paddingHorizontal: 24,
-    marginTop: 32,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 20,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  statCard: {
-    width: (Dimensions.get('window').width - 80) / 2,
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderRadius: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  statIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  statNumber: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  badgesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-  },
-  badgeItem: {
-    alignItems: 'center',
-    width: (Dimensions.get('window').width - 104) / 3,
-  },
-  badgeIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  badgeName: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#374151',
-    textAlign: 'center',
-  },
-  noBadges: {
-    width: '100%',
-    alignItems: 'center',
-    paddingVertical: 32,
+
+  nameBlock: { flex: 1, paddingTop: 2 },
+  nameText: { fontSize: 20, fontWeight: '800', color: '#111827' },
+  emailText: { marginTop: 4, fontSize: 13, color: '#6B7280' },
+
+  inputLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  inlineInput: {
+    marginTop: 6,
     backgroundColor: '#F9FAFB',
-    borderRadius: 20,
-  },
-  noBadgesText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#374151',
-    marginTop: 16,
-  },
-  noBadgesHint: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     fontSize: 14,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginTop: 8,
-    paddingHorizontal: 32,
+    color: '#111827',
   },
-  menuContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+
+  statsRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    borderRadius: 14,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
   },
-  menuItem: {
+  statItem: { flex: 1, paddingVertical: 12, alignItems: 'center', backgroundColor: '#FBFDFF' },
+  statValue: { fontSize: 16, fontWeight: '800', color: '#111827' },
+  statLabel: { marginTop: 2, fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  statDivider: { width: 1, backgroundColor: '#EEF2F7' },
+
+  sectionBlock: { marginTop: 16 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: '#111827' },
+  sectionText: { marginTop: 10, fontSize: 13.5, color: '#4B5563', lineHeight: 20 },
+
+  textArea: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111827',
+    minHeight: 96,
+  },
+
+  infoRow: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
   },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  menuItemText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  menuItemRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  notificationBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#EF4444',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  notificationBadgeText: {
-    fontSize: 12,
+  infoLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  infoLabel: { fontSize: 13, color: '#6B7280', fontWeight: '700' },
+  infoValue: { fontSize: 13.5, color: '#111827', fontWeight: '700' },
+  infoInput: {
+    minWidth: 150,
+    textAlign: 'right',
+    fontSize: 13.5,
+    color: '#111827',
     fontWeight: '700',
-    color: '#FFFFFF',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  logoutButton: {
+
+  editActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  cancelBtnText: { fontSize: 14, fontWeight: '800', color: '#4B5563' },
+  saveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+  },
+  saveBtnText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
+
+  quickLinks: {
+    marginTop: 14,
+    marginHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
+    overflow: 'hidden',
+  },
+  quickTitle: { padding: 14, fontSize: 14, fontWeight: '800', color: '#111827' },
+  linkRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FEF2F2',
-    marginHorizontal: 24,
-    marginTop: 32,
-    paddingVertical: 18,
+  },
+  linkLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  linkText: { fontSize: 14, fontWeight: '700', color: '#374151' },
+
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 18,
+  },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  modalOptions: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 18 },
+  modalOption: {
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
     borderRadius: 16,
-    gap: 12,
+    backgroundColor: '#F9FAFB',
+    minWidth: 140,
+    borderWidth: 1,
+    borderColor: '#EEF2F7',
   },
-  logoutText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#EF4444',
-  },
-  footer: {
+  modalIcon: { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center' },
+  modalOptionText: { fontSize: 13, fontWeight: '800', color: '#374151' },
+  uploadingContainer: { alignItems: 'center', paddingVertical: 18 },
+  uploadingText: { marginTop: 8, fontSize: 13, color: '#6B7280', fontWeight: '600' },
+  cancelButton: {
+    marginTop: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    paddingVertical: 32,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
-  versionText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
+  cancelButtonText: { fontSize: 14, fontWeight: '800', color: '#EF4444' },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   TextInput, 
@@ -8,16 +8,17 @@ import {
   StyleSheet, 
   ScrollView, 
   ActivityIndicator,
-  SafeAreaView,
   Alert,
   Platform,
   KeyboardAvoidingView
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { saveReport } from '../utils/storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveReport } from './utils/storage';
 import { useRouter } from 'expo-router';
-import { MaterialIcons, FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 
 export default function NewReport() {
   const [description, setDescription] = useState('');
@@ -30,30 +31,142 @@ export default function NewReport() {
   const [locationDetails, setLocationDetails] = useState(null);
   const router = useRouter();
 
+  // =========================
+  // ✅ NEW: Draft Autosave / Restore (matches Dashboard "continueDraft")
+  // =========================
+  const DRAFT_KEY = 'reportDraft';
+  const restorePromptShown = useRef(false);
+  const draftSaveTimer = useRef(null);
+
+  const hasAnyDraftData = (d) => {
+    if (!d) return false;
+    return !!(
+      (d.title && d.title.trim()) ||
+      (d.description && d.description.trim()) ||
+      d.image ||
+      d.category ||
+      d.priority ||
+      d.locationDetails
+    );
+  };
+
+  const saveDraft = async (draft) => {
+    try {
+      await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {}
+  };
+
+  const loadDraft = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const clearDraft = async () => {
+    try {
+      await AsyncStorage.removeItem(DRAFT_KEY);
+    } catch {}
+  };
+
+  const applyDraftToForm = (draft) => {
+    setTitle(draft?.title || '');
+    setDescription(draft?.description || '');
+    setImage(draft?.image || null);
+    setCategory(draft?.category || null);
+    setPriority(draft?.priority || 'normal');
+    setLocationDetails(draft?.locationDetails || null);
+  };
+
+  useEffect(() => {
+    // Prompt restore only once when screen mounts
+    if (restorePromptShown.current) return;
+    restorePromptShown.current = true;
+
+    (async () => {
+      const draft = await loadDraft();
+      if (!hasAnyDraftData(draft)) return;
+
+      Alert.alert(
+        'Draft i Ruajtur',
+        'Keni një raport të papërfunduar. A dëshironi ta vazhdoni?',
+        [
+          {
+            text: 'Fshi Draft-in',
+            style: 'destructive',
+            onPress: async () => {
+              await clearDraft();
+            }
+          },
+          {
+            text: 'Vazhdo',
+            onPress: () => {
+              applyDraftToForm(draft);
+            }
+          },
+          { text: 'Anulo', style: 'cancel' }
+        ]
+      );
+    })();
+  }, []);
+
+  useEffect(() => {
+    // Debounced autosave
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+
+    draftSaveTimer.current = setTimeout(async () => {
+      const draft = {
+        title,
+        description,
+        image,
+        category,
+        priority,
+        locationDetails,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (!hasAnyDraftData(draft)) {
+        await clearDraft();
+        return;
+      }
+
+      await saveDraft(draft);
+    }, 650);
+
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+  }, [title, description, image, category, priority, locationDetails]);
+  // =========================
+  // END Draft Autosave / Restore
+  // =========================
+
+  // ✅ IDs duhet të përputhen me Dashboard: infrastructure/environment/security/other
   const categories = [
-    { id: 'infrastructure', label: 'Infrastructure', icon: 'road', color: '#3B82F6' },
-    { id: 'environment', label: 'Environment', icon: 'leaf', color: '#10B981' },
-    { id: 'safety', label: 'Safety', icon: 'shield-alt', color: '#EF4444' },
-    { id: 'lighting', label: 'Public Lighting', icon: 'lightbulb', color: '#F59E0B' },
-    { id: 'sanitation', label: 'Sanitation', icon: 'trash-alt', color: '#8B5CF6' },
-    { id: 'other', label: 'Other', icon: 'ellipsis-h', color: '#6B7280' }
+    { id: 'infrastructure', label: 'Infrastrukturë', icon: 'road', color: '#3B82F6', iconFamily: 'fontawesome' },
+    { id: 'environment', label: 'Mjedis / Pastërti', icon: 'leaf', color: '#10B981', iconFamily: 'fontawesome' },
+    { id: 'security', label: 'Siguri / Ndriçim', icon: 'security', color: '#EF4444', iconFamily: 'material' },
+    { id: 'other', label: 'Të Tjera', icon: 'more-horiz', color: '#6B7280', iconFamily: 'material' }
   ];
 
+  // ✅ IDs duhet të përputhen me Dashboard: urgent
   const priorities = [
-    { id: 'low', label: 'Low', color: '#6B7280', icon: 'chevron-down' },
-    { id: 'normal', label: 'Normal', color: '#3B82F6', icon: 'minus' },
-    { id: 'high', label: 'High', color: '#F59E0B', icon: 'chevron-up' },
-    { id: 'urgent', label: 'Urgent', color: '#EF4444', icon: 'exclamation' }
+    { id: 'low', label: 'I Ulët', color: '#6B7280', icon: 'arrow-downward' },
+    { id: 'normal', label: 'Normal', color: '#3B82F6', icon: 'remove' },
+    { id: 'high', label: 'I Lartë', color: '#F59E0B', icon: 'arrow-upward' },
+    { id: 'urgent', label: 'Urgjent', color: '#EF4444', icon: 'warning' }
   ];
 
   const pickImage = async () => {
     Alert.alert(
-      'Add Photo',
-      'Choose how you want to add a photo',
+      'Shto Foto',
+      'Zgjidhni si dëshironi të shtoni një foto',
       [
-        { text: 'Take Photo', onPress: takePhoto },
-        { text: 'Choose from Gallery', onPress: pickFromGallery },
-        { text: 'Cancel', style: 'cancel' }
+        { text: 'Bëj Foto', onPress: takePhoto },
+        { text: 'Zgjidh nga Galeria', onPress: pickFromGallery },
+        { text: 'Anulo', style: 'cancel' }
       ]
     );
   };
@@ -62,21 +175,21 @@ export default function NewReport() {
     setIsTakingPhoto(true);
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera permission is required to take photos.');
+      Alert.alert('Leje e nevojshme', 'Ju duhet leja e kamerës për të bërë foto.');
       setIsTakingPhoto(false);
       return;
     }
 
-    let result = await ImagePicker.launchCameraAsync({
+    const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,
     });
 
     setIsTakingPhoto(false);
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets?.[0]?.uri) {
       setImage(result.assets[0].uri);
-      analyzeImageForCategory(result.assets[0].uri);
+      if (description.trim()) classifyIssue(description);
     }
   };
 
@@ -84,12 +197,12 @@ export default function NewReport() {
     setIsTakingPhoto(true);
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Gallery permission is required to select photos.');
+      Alert.alert('Leje e nevojshme', 'Ju duhet leja e galerisë për të zgjedhur foto.');
       setIsTakingPhoto(false);
       return;
     }
 
-    let result = await ImagePicker.launchImageLibraryAsync({
+    const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
@@ -97,76 +210,78 @@ export default function NewReport() {
     });
 
     setIsTakingPhoto(false);
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets?.[0]?.uri) {
       setImage(result.assets[0].uri);
-      analyzeImageForCategory(result.assets[0].uri);
+      if (description.trim()) classifyIssue(description);
     }
   };
 
-  const analyzeImageForCategory = (imageUri) => {
-    // In a real app, this would use ML to analyze the image
-    // For now, we'll use a simple heuristic based on description
-    if (description.length > 0) {
-      classifyIssue(description);
-    }
-  };
-
+  // ✅ Kthen vetëm kategoritë që i njeh Dashboard-i
   const classifyIssue = (text) => {
-    const t = text.toLowerCase();
-    if (t.includes('hole') || t.includes('road') || t.includes('street') || t.includes('grop') || t.includes('rrug')) {
+    const t = (text || '').toLowerCase();
+
+    // Infrastrukturë
+    if (
+      t.includes('vrim') || t.includes('rrug') || t.includes('asfalt') ||
+      t.includes('trotoar') || t.includes('grop') || t.includes('kanal')
+    ) {
       setCategory('infrastructure');
-      return 'Infrastructure';
+      return 'infrastructure';
     }
-    if (t.includes('light') || t.includes('dark') || t.includes('drit') || t.includes('erret')) {
-      setCategory('lighting');
-      return 'Public Lighting';
-    }
-    if (t.includes('garbage') || t.includes('trash') || t.includes('waste') || t.includes('mbeturin') || t.includes('pis')) {
-      setCategory('sanitation');
-      return 'Sanitation';
-    }
-    if (t.includes('danger') || t.includes('safety') || t.includes('accident') || t.includes('siguri')) {
-      setCategory('safety');
-      return 'Safety';
-    }
-    if (t.includes('tree') || t.includes('green') || t.includes('park') || t.includes('mjedis')) {
+
+    // Mjedis / Pastërti
+    if (
+      t.includes('mbeturin') || t.includes('pleh') || t.includes('pis') ||
+      t.includes('pastërti') || t.includes('kontejner') || t.includes('park') || t.includes('pem')
+    ) {
       setCategory('environment');
-      return 'Environment';
+      return 'environment';
     }
+
+    // Siguri / Ndriçim
+    if (
+      t.includes('drit') || t.includes('ndriçim') || t.includes('llamb') ||
+      t.includes('rrezik') || t.includes('siguri') || t.includes('aksident') || t.includes('trafik')
+    ) {
+      setCategory('security');
+      return 'security';
+    }
+
     setCategory('other');
-    return 'Other';
+    return 'other';
   };
 
   const getLocation = async () => {
     setLoading(true);
-    let { status } = await Location.requestForegroundPermissionsAsync();
+    const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission required', 'Location permission is required to report issues.');
+      Alert.alert('Leje e nevojshme', 'Ju duhet leja e lokacionit për të raportuar probleme.');
       setLoading(false);
       return null;
     }
 
     try {
-      let location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+
+      const addr = await Location.reverseGeocodeAsync({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude
       });
-      
-      // Get address from coordinates
-      let address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude
-      });
+
+      const addressText = addr?.[0]
+        ? `${addr[0].street || ''}${addr[0].street && addr[0].city ? ', ' : ''}${addr[0].city || ''}`.trim() || 'Lokacioni aktual'
+        : 'Lokacioni aktual';
 
       setLocationDetails({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        address: addressText
       });
 
-      Alert.alert('Location Captured', 'Your location has been successfully captured.');
-      return location;
-    } catch (error) {
-      Alert.alert('Error', 'Unable to get location. Please try again.');
+      Alert.alert('Lokacioni U Kap', 'Lokacioni juaj u kap me sukses.');
+      return loc;
+    } catch (e) {
+      Alert.alert('Gabim', 'Nuk mund të merret lokacioni. Ju lutem provoni përsëri.');
       return null;
     } finally {
       setLoading(false);
@@ -175,19 +290,19 @@ export default function NewReport() {
 
   const validateForm = () => {
     if (!title.trim()) {
-      Alert.alert('Missing Title', 'Please provide a title for your report.');
+      Alert.alert('Titulli Mungon', 'Ju lutem jepni një titull për raportin tuaj.');
       return false;
     }
     if (!description.trim()) {
-      Alert.alert('Missing Description', 'Please describe the issue in detail.');
+      Alert.alert('Përshkrimi Mungon', 'Ju lutem përshkruani problemin në detaje.');
       return false;
     }
     if (!image) {
-      Alert.alert('Missing Photo', 'Please add a photo of the issue.');
+      Alert.alert('Fotoja Mungon', 'Ju lutem shtoni një foto të problemit.');
       return false;
     }
     if (!category) {
-      Alert.alert('Missing Category', 'Please select a category for the issue.');
+      Alert.alert('Kategoria Mungon', 'Ju lutem zgjidhni një kategori për problemin.');
       return false;
     }
     return true;
@@ -195,78 +310,110 @@ export default function NewReport() {
 
   const handleSubmit = async () => {
     if (!validateForm()) return;
-    
+
     setLoading(true);
 
-    // Get location if not already captured
+    // Merr lokacionin nëse s’është kapur
     let locationData = locationDetails;
     if (!locationData) {
-      const location = await getLocation();
-      if (!location) {
+      const loc = await getLocation();
+      if (!loc) {
         setLoading(false);
         return;
       }
       locationData = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        address: 'Current Location'
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        address: 'Lokacioni aktual'
       };
     }
 
+    // ✅ Struktura përputhet 100% me Dashboard
     const newReport = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      id: Date.now().toString() + Math.random().toString(36).slice(2),
       title: title.trim(),
       description: description.trim(),
       image,
       location: {
-        lat: locationData.latitude,
-        lng: locationData.longitude,
+        latitude: locationData.latitude,
+        longitude: locationData.longitude,
         address: locationData.address
       },
-      category,
-      priority,
-      status: 'pending',
+      category,           // infrastructure/environment/security/other
+      priority,           // low/normal/high/urgent
+      status: 'pending',  // ✅ Dashboard pret 'pending'
       timestamp: new Date().toISOString(),
-      date: new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      })
     };
 
     try {
       await saveReport(newReport);
+
+      // ✅ Debug: shiko menjëherë çka ka në storage
+      const raw = await AsyncStorage.getItem('reports');
+      console.log('✅ AFTER SAVE reports =', raw);
+
+      // ✅ NEW: clear draft after successful submit
+      await clearDraft();
+
       setLoading(false);
-      
+
       Alert.alert(
-        'Report Submitted!',
-        'Your urban issue report has been successfully submitted and is under review.',
+        'Raporti U Dorëzua!',
+        'Raporti juaj u ruajt me sukses dhe tani duhet të shfaqet te “Raportet e Fundit”.',
         [
-          {
-            text: 'View Report',
-            onPress: () => {
-              router.replace('/');
-            }
-          },
-          {
-            text: 'Report Another',
-            onPress: () => {
-              // Reset form
+          { text: 'Kthehu në Dashboard', onPress: () => router.replace('/') },
+          { text: 'Raporto Një Tjetër', onPress: async () => {
               setTitle('');
               setDescription('');
               setImage(null);
               setCategory(null);
               setPriority('normal');
               setLocationDetails(null);
+              await clearDraft();
             }
           }
         ]
       );
     } catch (error) {
+      console.error('❌ Gabim në ruajtjen e raportit:', error);
       setLoading(false);
-      Alert.alert('Error', 'Failed to save report. Please try again.');
+      Alert.alert('Gabim', 'Nuk u ruajt raporti. Ju lutem provoni përsëri.');
     }
+  };
+
+  const CategoryIcon = ({ cat }) => {
+    if (cat.iconFamily === 'fontawesome') {
+      return <FontAwesome5 name={cat.icon} size={18} color={category === cat.id ? '#FFFFFF' : cat.color} />;
+    }
+    return <MaterialIcons name={cat.icon} size={18} color={category === cat.id ? '#FFFFFF' : cat.color} />;
+  };
+
+  const handleBackPress = () => {
+    // Draft autosaves automatically; just go back
+    router.back();
+  };
+
+  const handleDiscardDraft = async () => {
+    Alert.alert(
+      'Fshi Draft-in?',
+      'Kjo do t’i pastrojë të gjitha fushat dhe do ta fshijë draft-in e ruajtur.',
+      [
+        { text: 'Anulo', style: 'cancel' },
+        {
+          text: 'Fshi',
+          style: 'destructive',
+          onPress: async () => {
+            setTitle('');
+            setDescription('');
+            setImage(null);
+            setCategory(null);
+            setPriority('normal');
+            setLocationDetails(null);
+            await clearDraft();
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -282,35 +429,30 @@ export default function NewReport() {
         >
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
+            <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
               <MaterialIcons name="arrow-back" size={24} color="#1F2937" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Report Urban Issue</Text>
-            <View style={{ width: 40 }} />
+
+            <Text style={styles.headerTitle}>Raporto Problem Urban</Text>
+
+            {/* ✅ NEW: Discard Draft (keeps layout same width) */}
+            <TouchableOpacity style={styles.backButton} onPress={handleDiscardDraft}>
+              <MaterialIcons name="delete-outline" size={22} color="#EF4444" />
+            </TouchableOpacity>
           </View>
 
-          {/* Photo Section */}
+          {/* Foto */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Add Photo Evidence</Text>
-            <Text style={styles.sectionSubtitle}>A clear photo helps us understand the issue better</Text>
-            
-            <TouchableOpacity 
-              style={styles.imagePicker}
-              onPress={pickImage}
-              disabled={isTakingPhoto}
-            >
+            <Text style={styles.sectionTitle}>Shto Foto Dëshmi</Text>
+            <Text style={styles.sectionSubtitle}>Një foto e qartë na ndihmon të kuptojmë më mirë problemin</Text>
+
+            <TouchableOpacity style={styles.imagePicker} onPress={pickImage} disabled={isTakingPhoto}>
               {image ? (
                 <View style={styles.imageContainer}>
                   <Image source={{ uri: image }} style={styles.image} />
-                  <TouchableOpacity 
-                    style={styles.replaceButton}
-                    onPress={pickImage}
-                  >
+                  <TouchableOpacity style={styles.replaceButton} onPress={pickImage}>
                     <MaterialIcons name="camera-alt" size={20} color="#FFFFFF" />
-                    <Text style={styles.replaceText}>Replace</Text>
+                    <Text style={styles.replaceText}>Zëvendëso</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -322,8 +464,8 @@ export default function NewReport() {
                       <View style={styles.cameraIcon}>
                         <MaterialIcons name="camera-alt" size={48} color="#3B82F6" />
                       </View>
-                      <Text style={styles.pickerText}>Tap to add photo</Text>
-                      <Text style={styles.pickerHint}>Take a photo or choose from gallery</Text>
+                      <Text style={styles.pickerText}>Prek për të shtuar foto</Text>
+                      <Text style={styles.pickerHint}>Bëj një foto ose zgjidh nga galeria</Text>
                     </>
                   )}
                 </View>
@@ -331,32 +473,27 @@ export default function NewReport() {
             </TouchableOpacity>
           </View>
 
-          {/* Title Section */}
+          {/* Titulli */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Report Title</Text>
-            <TextInput 
+            <Text style={styles.sectionTitle}>Titulli i Raportit</Text>
+            <TextInput
               style={styles.titleInput}
-              placeholder="Brief title of the issue (e.g., 'Pothole on Main Street')"
+              placeholder="Titull i shkurtër i problemit (p.sh., 'Vrimë në Rrugën Kryesore')"
               placeholderTextColor="#9CA3AF"
               value={title}
               onChangeText={(text) => {
                 setTitle(text);
-                if (text.length > 0) classifyIssue(text);
+                if (text.trim()) classifyIssue(text);
               }}
               maxLength={60}
             />
             <Text style={styles.charCount}>{title.length}/60</Text>
           </View>
 
-          {/* Category Section */}
+          {/* Kategoria */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Category</Text>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              style={styles.categoryScroll}
-              contentContainerStyle={styles.categoryContainer}
-            >
+            <Text style={styles.sectionTitle}>Kategoria</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll} contentContainerStyle={styles.categoryContainer}>
               {categories.map((cat) => (
                 <TouchableOpacity
                   key={cat.id}
@@ -371,7 +508,7 @@ export default function NewReport() {
                     styles.categoryIcon,
                     { backgroundColor: category === cat.id ? cat.color : `${cat.color}20` }
                   ]}>
-                    <FontAwesome5 name={cat.icon} size={18} color={category === cat.id ? '#FFFFFF' : cat.color} />
+                    <CategoryIcon cat={cat} />
                   </View>
                   <Text style={[
                     styles.categoryLabel,
@@ -384,9 +521,9 @@ export default function NewReport() {
             </ScrollView>
           </View>
 
-          {/* Priority Section */}
+          {/* Prioriteti */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Priority Level</Text>
+            <Text style={styles.sectionTitle}>Niveli i Prioritetit</Text>
             <View style={styles.priorityContainer}>
               {priorities.map((pri) => (
                 <TouchableOpacity
@@ -398,11 +535,7 @@ export default function NewReport() {
                   ]}
                   onPress={() => setPriority(pri.id)}
                 >
-                  <MaterialIcons 
-                    name={pri.icon} 
-                    size={20} 
-                    color={priority === pri.id ? '#FFFFFF' : pri.color} 
-                  />
+                  <MaterialIcons name={pri.icon} size={20} color={priority === pri.id ? '#FFFFFF' : pri.color} />
                   <Text style={[
                     styles.priorityLabel,
                     priority === pri.id && styles.priorityLabelActive
@@ -414,12 +547,12 @@ export default function NewReport() {
             </View>
           </View>
 
-          {/* Description Section */}
+          {/* Përshkrimi */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Detailed Description</Text>
-            <TextInput 
+            <Text style={styles.sectionTitle}>Përshkrim i Detajuar</Text>
+            <TextInput
               style={styles.descriptionInput}
-              placeholder="Describe the issue in detail. Include any relevant information that might help us understand and resolve it faster..."
+              placeholder="Përshkruani problemin në detaje..."
               placeholderTextColor="#9CA3AF"
               multiline
               numberOfLines={6}
@@ -427,52 +560,39 @@ export default function NewReport() {
               value={description}
               onChangeText={(text) => {
                 setDescription(text);
-                if (text.length > 0 && !category) {
-                  classifyIssue(text);
-                }
+                if (text.trim() && !category) classifyIssue(text);
               }}
+              maxLength={500}
             />
             <Text style={styles.charCount}>{description.length}/500</Text>
           </View>
 
-          {/* Location Section */}
+          {/* Lokacioni */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <TouchableOpacity 
-              style={styles.locationButton}
-              onPress={getLocation}
-              disabled={loading}
-            >
+            <Text style={styles.sectionTitle}>Lokacioni</Text>
+            <TouchableOpacity style={styles.locationButton} onPress={getLocation} disabled={loading}>
               <View style={styles.locationIcon}>
-                <MaterialIcons 
-                  name={locationDetails ? "location-on" : "location-searching"} 
-                  size={24} 
-                  color={locationDetails ? "#10B981" : "#3B82F6"} 
+                <MaterialIcons
+                  name={locationDetails ? "location-on" : "location-searching"}
+                  size={24}
+                  color={locationDetails ? "#10B981" : "#3B82F6"}
                 />
               </View>
               <View style={styles.locationInfo}>
                 <Text style={styles.locationTitle}>
-                  {locationDetails ? 'Location Captured' : 'Get Current Location'}
+                  {locationDetails ? 'Lokacioni U Kap' : 'Merr Lokacionin Aktual'}
                 </Text>
                 <Text style={styles.locationSubtitle} numberOfLines={2}>
-                  {locationDetails?.address || 'Tap to capture your current location'}
+                  {locationDetails?.address || 'Prek për të kapur lokacionin tuaj aktual'}
                 </Text>
               </View>
-              {loading ? (
-                <ActivityIndicator size="small" color="#3B82F6" />
-              ) : (
-                <MaterialIcons 
-                  name="chevron-right" 
-                  size={24} 
-                  color="#9CA3AF" 
-                />
-              )}
+              {loading ? <ActivityIndicator size="small" color="#3B82F6" /> : <MaterialIcons name="chevron-right" size={24} color="#9CA3AF" />}
             </TouchableOpacity>
           </View>
 
-          {/* Submit Button */}
+          {/* Submit */}
           <View style={styles.submitSection}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.submitButton,
                 (!title || !description || !image || !category) && styles.submitButtonDisabled
@@ -485,15 +605,16 @@ export default function NewReport() {
               ) : (
                 <>
                   <MaterialIcons name="send" size={20} color="#FFFFFF" />
-                  <Text style={styles.submitButtonText}>Submit Report</Text>
+                  <Text style={styles.submitButtonText}>Dorëzo Raportin</Text>
                 </>
               )}
             </TouchableOpacity>
-            
+
             <Text style={styles.disclaimer}>
-              By submitting, you confirm this is a genuine urban issue and agree to our reporting guidelines.
+              Duke e dorëzuar, ju konfirmoni se ky është një problem urban i vërtetë.
             </Text>
           </View>
+
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -501,19 +622,11 @@ export default function NewReport() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
+  safeArea: { flex: 1, backgroundColor: '#F9FAFB' },
+  keyboardView: { flex: 1 },
+  container: { flex: 1 },
+  scrollContent: { paddingBottom: 40 },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -526,33 +639,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E5E7EB',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#F3F4F6',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  section: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 8,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 16,
-  },
+  headerTitle: { fontSize: 20, fontWeight: '700', color: '#1F2937' },
+
+  section: { paddingHorizontal: 24, marginTop: 24 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 8 },
+  sectionSubtitle: { fontSize: 14, color: '#6B7280', marginBottom: 16 },
+
   imagePicker: {
     borderRadius: 20,
     overflow: 'hidden',
@@ -563,39 +659,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  emptyImage: {
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
+  emptyImage: { height: 200, justifyContent: 'center', alignItems: 'center', padding: 20 },
   cameraIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 80, height: 80, borderRadius: 40,
     backgroundColor: '#EFF6FF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center',
     marginBottom: 16,
   },
-  pickerText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  pickerHint: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-  },
-  imageContainer: {
-    position: 'relative',
-  },
-  image: {
-    width: '100%',
-    height: 200,
-  },
+  pickerText: { fontSize: 16, fontWeight: '600', color: '#1F2937', marginBottom: 4 },
+  pickerHint: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
+  imageContainer: { position: 'relative' },
+  image: { width: '100%', height: 200 },
   replaceButton: {
     position: 'absolute',
     bottom: 16,
@@ -608,11 +682,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     gap: 6,
   },
-  replaceText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  replaceText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+
   titleInput: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -623,19 +694,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1F2937',
   },
-  charCount: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'right',
-    marginTop: 4,
-  },
-  categoryScroll: {
-    marginHorizontal: -24,
-  },
-  categoryContainer: {
-    paddingHorizontal: 24,
-    gap: 12,
-  },
+  charCount: { fontSize: 12, color: '#9CA3AF', textAlign: 'right', marginTop: 4 },
+
+  categoryScroll: { marginHorizontal: -24 },
+  categoryContainer: { paddingHorizontal: 24, gap: 12 },
   categoryButton: {
     alignItems: 'center',
     padding: 16,
@@ -643,33 +705,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
     borderColor: '#E5E7EB',
-    minWidth: 100,
+    minWidth: 110,
   },
-  categoryButtonActive: {
-    backgroundColor: '#F0F9FF',
-    borderWidth: 2,
-  },
+  categoryButtonActive: { backgroundColor: '#F0F9FF', borderWidth: 2 },
   categoryIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 48, height: 48, borderRadius: 24,
+    justifyContent: 'center', alignItems: 'center',
     marginBottom: 8,
   },
-  categoryLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  categoryLabelActive: {
-    color: '#1F2937',
-  },
-  priorityContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
+  categoryLabel: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  categoryLabelActive: { color: '#1F2937' },
+
+  priorityContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   priorityButton: {
     flex: 1,
     flexDirection: 'row',
@@ -683,17 +730,10 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     gap: 8,
   },
-  priorityButtonActive: {
-    backgroundColor: '#1E40AF',
-    borderColor: '#1E40AF',
-  },
-  priorityLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  priorityLabelActive: {
-    color: '#FFFFFF',
-  },
+  priorityButtonActive: { backgroundColor: '#1E40AF', borderColor: '#1E40AF' },
+  priorityLabel: { fontSize: 14, fontWeight: '600' },
+  priorityLabelActive: { color: '#FFFFFF' },
+
   descriptionInput: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -706,6 +746,7 @@ const styles = StyleSheet.create({
     height: 150,
     textAlignVertical: 'top',
   },
+
   locationButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -717,30 +758,15 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   locationIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 48, height: 48, borderRadius: 24,
     backgroundColor: '#F0F9FF',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'center', alignItems: 'center',
   },
-  locationInfo: {
-    flex: 1,
-  },
-  locationTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 4,
-  },
-  locationSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  submitSection: {
-    paddingHorizontal: 24,
-    marginTop: 32,
-  },
+  locationInfo: { flex: 1 },
+  locationTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937', marginBottom: 4 },
+  locationSubtitle: { fontSize: 14, color: '#6B7280' },
+
+  submitSection: { paddingHorizontal: 24, marginTop: 32 },
   submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -756,19 +782,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  disclaimer: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginTop: 16,
-    lineHeight: 18,
-  },
+  submitButtonDisabled: { opacity: 0.5 },
+  submitButtonText: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
+  disclaimer: { fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 16, lineHeight: 18 },
 });

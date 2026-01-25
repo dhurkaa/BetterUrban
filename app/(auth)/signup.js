@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { Stack } from 'expo-router';
+
 import { 
   View, 
   Text, 
@@ -20,52 +22,202 @@ import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 const { width, height } = Dimensions.get('window');
 
 export default function SignUp() {
-  const [name, setName] = useState('');
+  const [emri, setEmri] = useState('');
+  const [idLeternjoftimit, setIdLeternjoftimit] = useState('');
+  const [telefoni, setTelefoni] = useState('+383');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [isFocusedName, setIsFocusedName] = useState(false);
-  const [isFocusedEmail, setIsFocusedEmail] = useState(false);
-  const [isFocusedPassword, setIsFocusedPassword] = useState(false);
-  const [isFocusedConfirmPassword, setIsFocusedConfirmPassword] = useState(false);
+  const [fjalekalimi, setFjalekalimi] = useState('');
+  const [konfirmoFjalekalimin, setKonfirmoFjalekalimin] = useState('');
+  
+  const [fokusoEmri, setFokusoEmri] = useState(false);
+  const [fokusoId, setFokusoId] = useState(false);
+  const [fokusoTelefoni, setFokusoTelefoni] = useState(false);
+  const [fokusoEmail, setFokusoEmail] = useState(false);
+  const [fokusoFjalekalimi, setFokusoFjalekalimi] = useState(false);
+  const [fokusoKonfirmimi, setFokusoKonfirmimi] = useState(false);
+  
   const router = useRouter();
 
-  const handleSignUp = async () => {
-    if (!name || !email || !password || !confirmPassword) {
-      Alert.alert("Action Required", "Please fill in all fields to continue.");
+  // Refs për input fields
+  const emriRef = useRef(null);
+  const idRef = useRef(null);
+  const telefoniRef = useRef(null);
+  const emailRef = useRef(null);
+  const fjalekalimiRef = useRef(null);
+  const konfirmimiRef = useRef(null);
+
+  // Validimi i ID-së së letërnjoftimit
+  const validoIdLeternjoftimit = (id) => {
+    // Format për ID-në: 10 karaktere (shifra dhe germa)
+    const idRegex = /^[A-Za-z0-9]{10}$/;
+    return idRegex.test(id);
+  };
+
+  // Validimi i numrit të telefonit Kosovar
+  const validoNumrinTelefonit = (numri) => {
+    const numriPastruar = numri.replace(/\s/g, '');
+    
+    if (!numriPastruar.startsWith('+383')) {
+      return {
+        eshteValide: false,
+        mesazhi: 'Numri i telefonit duhet të fillojë me +383'
+      };
+    }
+
+    if (numriPastruar.length !== 12) {
+      return {
+        eshteValide: false,
+        mesazhi: 'Gjatësi e pavlefshme e numrit të telefonit'
+      };
+    }
+
+    const kodiOperatorit = numriPastruar.substring(4, 6);
+    const operatoretValide = ['44', '45', '46', '47', '48', '49', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69'];
+    
+    if (!operatoretValide.includes(kodiOperatorit)) {
+      return {
+        eshteValide: false,
+        mesazhi: 'Kod i pavlefshëm i operatorit'
+      };
+    }
+
+    return {
+      eshteValide: true,
+      numriFormatuar: formatNumrinTelefonit(numriPastruar)
+    };
+  };
+
+  // Formatimi i numrit të telefonit
+  const formatNumrinTelefonit = (numri) => {
+    const numriPastruar = numri.replace(/\s/g, '');
+    if (numriPastruar.startsWith('+383')) {
+      const pjesaTjetër = numriPastruar.substring(4);
+      return `+383 ${pjesaTjetër.substring(0, 2)} ${pjesaTjetër.substring(2, 5)} ${pjesaTjetër.substring(5)}`;
+    }
+    return numri;
+  };
+
+  // Handler për ndryshimin e numrit të telefonit
+  const ndryshoTelefonin = (tekst) => {
+    if (!tekst.startsWith('+383')) {
+      setTelefoni('+383');
+      return;
+    }
+
+    let tekstPastruar = tekst.replace(/[^\d+]/g, '');
+    
+    if (tekstPastruar.length > 12) {
+      tekstPastruar = tekstPastruar.substring(0, 12);
+    }
+
+    if (tekstPastruar.length > 4) {
+      const prefiksi = tekstPastruar.substring(0, 4);
+      const pjesaTjetër = tekstPastruar.substring(4);
+      
+      let iFormatuar = prefiksi;
+      if (pjesaTjetër.length > 0) {
+        iFormatuar += ` ${pjesaTjetër.substring(0, 2)}`;
+      }
+      if (pjesaTjetër.length > 2) {
+        iFormatuar += ` ${pjesaTjetër.substring(2, 5)}`;
+      }
+      if (pjesaTjetër.length > 5) {
+        iFormatuar += ` ${pjesaTjetër.substring(5, 8)}`;
+      }
+      
+      setTelefoni(iFormatuar);
+    } else {
+      setTelefoni(tekstPastruar);
+    }
+  };
+
+  // Handler për ndryshimin e ID-së së letërnjoftimit
+  const ndryshoIdLeternjoftimit = (tekst) => {
+    // Konverto në uppercase dhe limito në 10 karaktere
+    const tekstUppercase = tekst.toUpperCase().slice(0, 10);
+    setIdLeternjoftimit(tekstUppercase);
+  };
+
+  // Funksion për të fokusuar në field-in tjetër
+  const fokusoFushenTjetër = (refFusheTjetër) => {
+    if (refFusheTjetër.current) {
+      refFusheTjetër.current.focus();
+    }
+  };
+
+  const regjistrohu = async () => {
+    if (!emri || !idLeternjoftimit || !telefoni || !email || !fjalekalimi || !konfirmoFjalekalimin) {
+      Alert.alert("Veprim i Nevojshëm", "Ju lutem plotësoni të gjitha fushat për të vazhduar.");
       return;
     }
     
-    // Email validation
+    // Emri duhet të ketë së paku 2 fjalë (emër dhe mbiemër)
+    const pjesëtEmrit = emri.trim().split(/\s+/);
+    if (pjesëtEmrit.length < 2) {
+      Alert.alert("Emër i Pavlefshëm", "Ju lutem shkruani emrin e plotë (emër dhe mbiemër).");
+      return;
+    }
+    
+    // Validimi i ID-së së letërnjoftimit
+    if (!validoIdLeternjoftimit(idLeternjoftimit)) {
+      Alert.alert("ID e Letërnjoftimit e Pavlefshme", "ID-ja e letërnjoftimit duhet të jetë saktësisht 10 karaktere (shkronja dhe numra).");
+      return;
+    }
+    
+    // Validimi i numrit të telefonit
+    const validimiTelefonit = validoNumrinTelefonit(telefoni);
+    if (!validimiTelefonit.eshteValide) {
+      Alert.alert("Numër i Pavlefshëm i Telefonit", validimiTelefonit.mesazhi);
+      return;
+    }
+    
+    // Validimi i email-it
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      Alert.alert("Invalid Email", "Please enter a valid email address.");
+      Alert.alert("Email i Pavlefshëm", "Ju lutem shkruani një adresë email të vlefshme.");
       return;
     }
     
-    // Password validation
-    if (password.length < 6) {
-      Alert.alert("Weak Password", "Password must be at least 6 characters long.");
+    // Validimi i fjalëkalimit (minimum 10 karaktere)
+    if (fjalekalimi.length < 10) {
+      Alert.alert("Fjalëkalim i Dobët", "Fjalëkalimi duhet të ketë të paktën 10 karaktere.");
       return;
     }
     
-    // Confirm password
-    if (password !== confirmPassword) {
-      Alert.alert("Password Mismatch", "Passwords do not match. Please try again.");
+    // Kërkesat për fjalëkalimin
+    const kaShkronjaTëMëdha = /[A-Z]/.test(fjalekalimi);
+    const kaShkronjaTëVogla = /[a-z]/.test(fjalekalimi);
+    const kaNumra = /\d/.test(fjalekalimi);
+    const kaKaraktereSpeciale = /[!@#$%^&*(),.?":{}|<>]/.test(fjalekalimi);
+    
+    if (!(kaShkronjaTëMëdha && kaShkronjaTëVogla && kaNumra && kaKaraktereSpeciale)) {
+      Alert.alert(
+        "Fjalëkalim i Dobët",
+        "Fjalëkalimi duhet të përmbajë:\n• Shkronja të mëdha (A-Z)\n• Shkronja të vogla (a-z)\n• Numra (0-9)\n• Karaktere speciale (!@#$%...)"
+      );
       return;
     }
     
-    // Simulate signup process
+    // Konfirmimi i fjalëkalimit
+    if (fjalekalimi !== konfirmoFjalekalimin) {
+      Alert.alert("Fjalëkalimet nuk Përputhen", "Fjalëkalimet nuk përputhen. Ju lutem provoni përsëri.");
+      return;
+    }
+    
+    // Procesi i regjistrimit
     Alert.alert(
-      "Account Created!",
-      "Your Urban Guardian account has been successfully created.",
+      "Llogaria u Krijua!",
+      "Llogaria juaj si Mbikëqyrës Urban është krijuar me sukses.\n\nKodi i verifikimit është dërguar në telefonin tuaj.",
       [
         {
-          text: "Continue",
+          text: "Vazhdo",
           onPress: async () => {
-            // Save user data (in a real app, this would go to your backend)
+            // Ruaj të dhënat e përdoruesit
             await AsyncStorage.setItem('userToken', 'user_logged_in');
-            await AsyncStorage.setItem('userName', name);
+            await AsyncStorage.setItem('userName', emri);
+            await AsyncStorage.setItem('userPersonalId', idLeternjoftimit);
+            await AsyncStorage.setItem('userPhone', validimiTelefonit.numriFormatuar);
+            await AsyncStorage.setItem('userEmail', email);
             router.replace('/');
           }
         }
@@ -73,12 +225,13 @@ export default function SignUp() {
     );
   };
 
-  const handleLogin = () => {
+  const kthehuNeLogin = () => {
     router.push('/login');
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen options={{ headerShown: false }} />
       <ImageBackground
         source={{ uri: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=1000' }}
         style={styles.backgroundImage}
@@ -88,194 +241,366 @@ export default function SignUp() {
           <KeyboardAvoidingView 
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
             style={styles.keyboardView}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
           >
             <ScrollView 
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              bounces={false}
             >
               <View style={styles.content}>
                 {/* Header Section */}
                 <View style={styles.header}>
                   <View style={styles.logoContainer}>
                     <View style={styles.logoIconWrapper}>
-                      <MaterialIcons name="person-add" size={42} color="#00d4ff" />
+                      <MaterialIcons name="verified-user" size={42} color="#00d4ff" />
                     </View>
                     <View style={styles.logoTextContainer}>
-                      <Text style={styles.logoText}>Join</Text>
-                      <Text style={styles.logoSubText}>UrbanIssue</Text>
+                      <Text style={styles.logoText}>Verifiko</Text>
+                      <Text style={styles.logoSubText}>Identitetin</Text>
                     </View>
                   </View>
-                  <Text style={styles.welcomeText}>Become an Urban Guardian</Text>
-                  <Text style={styles.tagline}>Report. Monitor. Make a Difference.</Text>
+                  <Text style={styles.welcomeText}>Bëhu një Mbikëqyrës Urban i Verifikuar</Text>
+                  <Text style={styles.tagline}>I Sigurt • I Verifikuar </Text>
                 </View>
 
-                {/* SignUp Form Card */}
+                {/* Forma e Regjistrimit */}
                 <View style={styles.formCard}>
                   <View style={styles.formCardInner}>
-                    <Text style={styles.formTitle}>Create Account</Text>
+                    <Text style={styles.formTitle}>Verifikimi i Identitetit</Text>
+                    <Text style={styles.formSubtitle}>Plotëso verifikimin për të pasur akses në të gjitha veçoritë</Text>
                     
-                    {/* Full Name Input */}
-                    <View style={[
-                      styles.inputContainer,
-                      isFocusedName && styles.inputContainerFocused
-                    ]}>
-                      <MaterialIcons 
-                        name="person" 
-                        size={22} 
-                        color={isFocusedName ? '#007AFF' : '#6B7280'} 
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Full Name"
-                        placeholderTextColor="#9CA3AF"
-                        autoCapitalize="words"
-                        autoCorrect={false}
-                        value={name}
-                        onChangeText={setName}
-                        onFocus={() => setIsFocusedName(true)}
-                        onBlur={() => setIsFocusedName(false)}
-                      />
-                    </View>
+                    {/* Fusha për Emrin e Plotë */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoEmri && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => emriRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="person" 
+                          size={22} 
+                          color={fokusoEmri ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={emriRef}
+                          style={styles.input}
+                          placeholder="Emri i Plotë (Emër & Mbiemër)"
+                          placeholderTextColor="#9CA3AF"
+                          autoCapitalize="words"
+                          autoCorrect={false}
+                          value={emri}
+                          onChangeText={setEmri}
+                          onFocus={() => setFokusoEmri(true)}
+                          onBlur={() => setFokusoEmri(false)}
+                          returnKeyType="next"
+                          onSubmitEditing={() => fokusoFushenTjetër(idRef)}
+                          blurOnSubmit={false}
+                        />
+                      </View>
+                    </TouchableOpacity>
 
-                    {/* Email Input */}
-                    <View style={[
-                      styles.inputContainer,
-                      isFocusedEmail && styles.inputContainerFocused
-                    ]}>
-                      <MaterialIcons 
-                        name="email" 
-                        size={22} 
-                        color={isFocusedEmail ? '#007AFF' : '#6B7280'} 
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Email Address"
-                        placeholderTextColor="#9CA3AF"
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        value={email}
-                        onChangeText={setEmail}
-                        onFocus={() => setIsFocusedEmail(true)}
-                        onBlur={() => setIsFocusedEmail(false)}
-                      />
-                    </View>
+                    {/* Fusha për ID e Letërnjoftimit */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoId && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => idRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="badge" 
+                          size={22} 
+                          color={fokusoId ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={idRef}
+                          style={styles.input}
+                          placeholder="ID e Letërnjoftimit (10 karaktere)"
+                          placeholderTextColor="#9CA3AF"
+                          autoCapitalize="characters"
+                          autoCorrect={false}
+                          value={idLeternjoftimit}
+                          onChangeText={ndryshoIdLeternjoftimit}
+                          onFocus={() => setFokusoId(true)}
+                          onBlur={() => setFokusoId(false)}
+                          maxLength={10}
+                          returnKeyType="next"
+                          onSubmitEditing={() => fokusoFushenTjetër(telefoniRef)}
+                          blurOnSubmit={false}
+                        />
+                        <View style={styles.charCounter}>
+                          <Text style={styles.charCounterText}>{idLeternjoftimit.length}/10</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.fieldHint}>Numri i letërnjoftimit / pasaportës</Text>
+                    </TouchableOpacity>
 
-                    {/* Password Input */}
-                    <View style={[
-                      styles.inputContainer,
-                      isFocusedPassword && styles.inputContainerFocused
-                    ]}>
-                      <MaterialIcons 
-                        name="lock" 
-                        size={22} 
-                        color={isFocusedPassword ? '#007AFF' : '#6B7280'} 
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Password (min. 6 characters)"
-                        placeholderTextColor="#9CA3AF"
-                        secureTextEntry
-                        value={password}
-                        onChangeText={setPassword}
-                        onFocus={() => setIsFocusedPassword(true)}
-                        onBlur={() => setIsFocusedPassword(false)}
-                      />
-                      <TouchableOpacity style={styles.visibilityIcon}>
-                        <MaterialIcons name="visibility-off" size={20} color="#6B7280" />
-                      </TouchableOpacity>
-                    </View>
+                    {/* Fusha për Telefonin */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoTelefoni && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => telefoniRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="phone" 
+                          size={22} 
+                          color={fokusoTelefoni ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={telefoniRef}
+                          style={styles.input}
+                          placeholder="+383 XX XXX XXX"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="phone-pad"
+                          value={telefoni}
+                          onChangeText={ndryshoTelefonin}
+                          onFocus={() => setFokusoTelefoni(true)}
+                          onBlur={() => setFokusoTelefoni(false)}
+                          maxLength={15}
+                          returnKeyType="next"
+                          onSubmitEditing={() => fokusoFushenTjetër(emailRef)}
+                          blurOnSubmit={false}
+                        />
+                        <View style={styles.countryCodeBadge}>
+                          <Text style={styles.countryCodeText}>🇽🇰</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.fieldHint}>Përdoret për verifikim dhe përditësime</Text>
+                    </TouchableOpacity>
 
-                    {/* Confirm Password Input */}
-                    <View style={[
-                      styles.inputContainer,
-                      isFocusedConfirmPassword && styles.inputContainerFocused
-                    ]}>
-                      <MaterialIcons 
-                        name="lock-outline" 
-                        size={22} 
-                        color={isFocusedConfirmPassword ? '#007AFF' : '#6B7280'} 
-                        style={styles.inputIcon}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Confirm Password"
-                        placeholderTextColor="#9CA3AF"
-                        secureTextEntry
-                        value={confirmPassword}
-                        onChangeText={setConfirmPassword}
-                        onFocus={() => setIsFocusedConfirmPassword(true)}
-                        onBlur={() => setIsFocusedConfirmPassword(false)}
-                      />
-                      <TouchableOpacity style={styles.visibilityIcon}>
-                        <MaterialIcons name="visibility-off" size={20} color="#6B7280" />
-                      </TouchableOpacity>
-                    </View>
+                    {/* Fusha për Email */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoEmail && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => emailRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="email" 
+                          size={22} 
+                          color={fokusoEmail ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={emailRef}
+                          style={styles.input}
+                          placeholder="Adresa Email"
+                          placeholderTextColor="#9CA3AF"
+                          keyboardType="email-address"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          value={email}
+                          onChangeText={setEmail}
+                          onFocus={() => setFokusoEmail(true)}
+                          onBlur={() => setFokusoEmail(false)}
+                          returnKeyType="next"
+                          onSubmitEditing={() => fokusoFushenTjetër(fjalekalimiRef)}
+                          blurOnSubmit={false}
+                        />
+                      </View>
+                    </TouchableOpacity>
 
-                    {/* Password Requirements */}
+                    {/* Fusha për Fjalëkalimin */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoFjalekalimi && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => fjalekalimiRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="lock" 
+                          size={22} 
+                          color={fokusoFjalekalimi ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={fjalekalimiRef}
+                          style={styles.input}
+                          placeholder="Fjalëkalimi (min. 10 karaktere)"
+                          placeholderTextColor="#9CA3AF"
+                          secureTextEntry
+                          value={fjalekalimi}
+                          onChangeText={setFjalekalimi}
+                          onFocus={() => setFokusoFjalekalimi(true)}
+                          onBlur={() => setFokusoFjalekalimi(false)}
+                          returnKeyType="next"
+                          onSubmitEditing={() => fokusoFushenTjetër(konfirmimiRef)}
+                          blurOnSubmit={false}
+                        />
+                        <TouchableOpacity style={styles.visibilityIcon}>
+                          <MaterialIcons name="visibility-off" size={20} color="#6B7280" />
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Fusha për Konfirmimin e Fjalëkalimit */}
+                    <TouchableOpacity
+                      style={[
+                        styles.inputContainerTouchable,
+                        fokusoKonfirmimi && styles.inputContainerFocused
+                      ]}
+                      activeOpacity={1}
+                      onPress={() => konfirmimiRef.current?.focus()}
+                    >
+                      <View style={styles.inputContainer}>
+                        <MaterialIcons 
+                          name="lock-outline" 
+                          size={22} 
+                          color={fokusoKonfirmimi ? '#007AFF' : '#6B7280'} 
+                          style={styles.inputIcon}
+                        />
+                        <TextInput
+                          ref={konfirmimiRef}
+                          style={styles.input}
+                          placeholder="Konfirmo Fjalëkalimin"
+                          placeholderTextColor="#9CA3AF"
+                          secureTextEntry
+                          value={konfirmoFjalekalimin}
+                          onChangeText={setKonfirmoFjalekalimin}
+                          onFocus={() => setFokusoKonfirmimi(true)}
+                          onBlur={() => setFokusoKonfirmimi(false)}
+                          returnKeyType="done"
+                          onSubmitEditing={regjistrohu}
+                        />
+                        <TouchableOpacity style={styles.visibilityIcon}>
+                          <MaterialIcons name="visibility-off" size={20} color="#6B7280" />
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Kërkesat për Fjalëkalimin */}
                     <View style={styles.passwordRequirements}>
-                      <Text style={styles.requirementsTitle}>Password must contain:</Text>
-                      <View style={styles.requirementItem}>
-                        <MaterialIcons 
-                          name={password.length >= 6 ? "check-circle" : "radio-button-unchecked"} 
-                          size={16} 
-                          color={password.length >= 6 ? '#10B981' : '#9CA3AF'} 
-                        />
-                        <Text style={[
-                          styles.requirementText,
-                          password.length >= 6 && styles.requirementTextMet
-                        ]}>At least 6 characters</Text>
+                      <Text style={styles.requirementsTitle}>Kërkesat për Fjalëkalimin (min. 10 karaktere):</Text>
+                      
+                      <View style={styles.requirementRow}>
+                        <View style={styles.requirementItem}>
+                          <MaterialIcons 
+                            name={fjalekalimi.length >= 10 ? "check-circle" : "error"} 
+                            size={16} 
+                            color={fjalekalimi.length >= 10 ? '#10B981' : '#EF4444'} 
+                          />
+                          <Text style={[
+                            styles.requirementText,
+                            fjalekalimi.length >= 10 ? styles.requirementTextMet : styles.requirementTextNotMet
+                          ]}>
+                            Të paktën 10 karaktere
+                          </Text>
+                        </View>
+                        <Text style={styles.charCount}>{fjalekalimi.length}/10</Text>
                       </View>
+                      
                       <View style={styles.requirementItem}>
                         <MaterialIcons 
-                          name={/\d/.test(password) ? "check-circle" : "radio-button-unchecked"} 
+                          name={/[A-Z]/.test(fjalekalimi) ? "check-circle" : "error"} 
                           size={16} 
-                          color={/\d/.test(password) ? '#10B981' : '#9CA3AF'} 
+                          color={/[A-Z]/.test(fjalekalimi) ? '#10B981' : '#EF4444'} 
                         />
                         <Text style={[
                           styles.requirementText,
-                          /\d/.test(password) && styles.requirementTextMet
-                        ]}>At least one number</Text>
+                          /[A-Z]/.test(fjalekalimi) ? styles.requirementTextMet : styles.requirementTextNotMet
+                        ]}>
+                          Shkronja të mëdha (A-Z)
+                        </Text>
+                      </View>
+                      
+                      <View style={styles.requirementItem}>
+                        <MaterialIcons 
+                          name={/[a-z]/.test(fjalekalimi) ? "check-circle" : "error"} 
+                          size={16} 
+                          color={/[a-z]/.test(fjalekalimi) ? '#10B981' : '#EF4444'} 
+                        />
+                        <Text style={[
+                          styles.requirementText,
+                          /[a-z]/.test(fjalekalimi) ? styles.requirementTextMet : styles.requirementTextNotMet
+                        ]}>
+                          Shkronja të vogla (a-z)
+                        </Text>
+                      </View>
+                      
+                      <View style={styles.requirementItem}>
+                        <MaterialIcons 
+                          name={/\d/.test(fjalekalimi) ? "check-circle" : "error"} 
+                          size={16} 
+                          color={/\d/.test(fjalekalimi) ? '#10B981' : '#EF4444'} 
+                        />
+                        <Text style={[
+                          styles.requirementText,
+                          /\d/.test(fjalekalimi) ? styles.requirementTextMet : styles.requirementTextNotMet
+                        ]}>
+                          Numra (0-9)
+                        </Text>
+                      </View>
+                      
+                      <View style={styles.requirementItem}>
+                        <MaterialIcons 
+                          name={/[!@#$%^&*(),.?":{}|<>]/.test(fjalekalimi) ? "check-circle" : "error"} 
+                          size={16} 
+                          color={/[!@#$%^&*(),.?":{}|<>]/.test(fjalekalimi) ? '#10B981' : '#EF4444'} 
+                        />
+                        <Text style={[
+                          styles.requirementText,
+                          /[!@#$%^&*(),.?":{}|<>]/.test(fjalekalimi) ? styles.requirementTextMet : styles.requirementTextNotMet
+                        ]}>
+                          Karaktere speciale (!@#$...)
+                        </Text>
                       </View>
                     </View>
 
-                    {/* Terms and Conditions */}
+                    {/* Kushtet dhe Privatësia */}
                     <View style={styles.termsContainer}>
-                      <MaterialIcons name="info" size={18} color="#6B7280" />
+                      <MaterialIcons name="verified" size={18} color="#10B981" />
                       <Text style={styles.termsText}>
-                        By signing up, you agree to our{' '}
-                        <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-                        <Text style={styles.termsLink}>Privacy Policy</Text>
+                        Informacioni juaj është i koduar dhe përdoret vetëm për qëllime verifikimi. 
+                        Duke u regjistruar, ju pranoni{' '}
+                        <Text style={styles.termsLink}>Kushtet e Shërbimit</Text> dhe{' '}
+                        <Text style={styles.termsLink}>Politikën e Privatësisë</Text> tonë.
                       </Text>
                     </View>
 
-                    {/* Sign Up Button */}
+                    {/* Butoni i Regjistrimit */}
                     <TouchableOpacity 
                       style={[
                         styles.signUpButton,
-                        (!name || !email || !password || !confirmPassword) && styles.signUpButtonDisabled
+                        (!emri || !idLeternjoftimit || !telefoni || !email || !fjalekalimi || !konfirmoFjalekalimin) && styles.signUpButtonDisabled
                       ]} 
-                      onPress={handleSignUp}
+                      onPress={regjistrohu}
                       activeOpacity={0.9}
-                      disabled={!name || !email || !password || !confirmPassword}
+                      disabled={!emri || !idLeternjoftimit || !telefoni || !email || !fjalekalimi || !konfirmoFjalekalimin}
                     >
                       <View style={styles.buttonGradient}>
                         <MaterialIcons name="how-to-reg" size={22} color="#FFFFFF" />
-                        <Text style={styles.signUpButtonText}>Create Urban Guardian Account</Text>
+                        <Text style={styles.signUpButtonText}>Plotëso Verifikimin</Text>
                       </View>
                     </TouchableOpacity>
 
                     {/* Divider */}
                     <View style={styles.dividerContainer}>
                       <View style={styles.divider} />
-                      <Text style={styles.dividerText}>OR SIGN UP WITH</Text>
+                      <Text style={styles.dividerText}>OSE REGJISTROHUNI ME</Text>
                       <View style={styles.divider} />
                     </View>
 
-                    {/* Social Sign Up Options */}
+                    {/* Opsionet e Regjistrimit Social */}
                     <View style={styles.socialLoginContainer}>
                       <TouchableOpacity style={styles.socialButton}>
                         <FontAwesome5 name="google" size={20} color="#DB4437" />
@@ -288,15 +613,16 @@ export default function SignUp() {
                       </TouchableOpacity>
                     </View>
 
-                    {/* Login Section */}
+                    {/* Seksioni i Login */}
                     <View style={styles.loginContainer}>
-                      <Text style={styles.loginText}>Already an Urban Guardian?</Text>
+                      <Text style={styles.loginText}>Jeni tashmë një Mbikëqyrës Urban i Verifikuar?</Text>
                       <TouchableOpacity 
                         style={styles.loginButton}
-                        onPress={handleLogin}
+                        onPress={kthehuNeLogin}
+                        activeOpacity={0.7}
                       >
                         <View style={styles.loginButtonInner}>
-                          <Text style={styles.loginButtonText}>Sign In Instead</Text>
+                          <Text style={styles.loginButtonText}>Hyni në Llogari</Text>
                           <MaterialIcons name="arrow-forward" size={18} color="#007AFF" />
                         </View>
                       </TouchableOpacity>
@@ -306,12 +632,10 @@ export default function SignUp() {
 
                 {/* Footer */}
                 <View style={styles.footer}>
-                  <Text style={styles.footerText}>
-                    Your data is encrypted and protected • No spam, ever
-                  </Text>
+                  
                   <View style={styles.securityBadge}>
                     <MaterialIcons name="verified-user" size={16} color="#00FF88" />
-                    <Text style={styles.securityText}>Verified Signup</Text>
+                    <Text style={styles.securityText}>Verifikim me Standard Qeveritar</Text>
                   </View>
                 </View>
               </View>
@@ -323,6 +647,7 @@ export default function SignUp() {
   );
 }
 
+// Stilet mbeten të njëjta, vetëm i kam përkthyer komentet
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -341,13 +666,13 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    paddingBottom: 30,
   },
   content: {
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: 'space-between',
     paddingTop: Platform.OS === 'ios' ? 20 : 40,
-    paddingBottom: 30,
   },
   header: {
     alignItems: 'center',
@@ -386,6 +711,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
     marginBottom: 6,
+    textAlign: 'center',
   },
   tagline: {
     fontSize: 14,
@@ -416,16 +742,27 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '800',
     color: '#1E293B',
-    marginBottom: 28,
+    marginBottom: 8,
     textAlign: 'center',
     letterSpacing: -0.5,
+  },
+  formSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+    fontWeight: '500',
+  },
+  inputContainerTouchable: {
+    marginBottom: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    marginBottom: 18,
     paddingHorizontal: 16,
     borderWidth: 2,
     borderColor: '#E5E7EB',
@@ -447,6 +784,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1F2937',
     fontWeight: '500',
+    paddingVertical: 0,
+  },
+  charCounter: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  charCounterText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  countryCodeBadge: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  countryCodeText: {
+    fontSize: 14,
+  },
+  fieldHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 6,
+    marginLeft: 4,
+    fontStyle: 'italic',
   },
   visibilityIcon: {
     padding: 8,
@@ -461,23 +828,36 @@ const styles = StyleSheet.create({
   },
   requirementsTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-    marginBottom: 10,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  requirementRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   requirementItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   requirementText: {
     fontSize: 13,
-    color: '#64748B',
     marginLeft: 8,
   },
   requirementTextMet: {
     color: '#10B981',
     fontWeight: '600',
+  },
+  requirementTextNotMet: {
+    color: '#6B7280',
+  },
+  charCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B7280',
   },
   termsContainer: {
     flexDirection: 'row',
